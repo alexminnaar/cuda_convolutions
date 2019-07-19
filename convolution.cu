@@ -2,34 +2,32 @@
 #include <stdio.h>
 
 #define TILE_SIZE 4
-#define TPB 4
 #define INPUT_SIZE 12
-#define MAX_MASK_WIDTH 5
-__constant__ float M[MAX_MASK_WIDTH];
+#define MASK_WIDTH 5
+__constant__ float M[MASK_WIDTH];
 
 __global__ void convolution_shared_memory(float *N, float *P){
 	
 	int i = blockIdx.x*blockDim.x+threadIdx.x;
 
-	__shared__ float N_ds[TILE_SIZE];
+	__shared__ float N_s[TILE_SIZE];
 
-	N_ds[threadIdx.x]=N[i];
+	N_s[threadIdx.x]=N[i];
 
 	__syncthreads();
 
 	int this_title_start_point = blockIdx.x*blockDim.x;
 	int next_tile_start_point = (blockIdx.x+1)*blockDim.x;
-	int N_start_point = i-(MAX_MASK_WIDTH/2);
+	int n_start_point = i-(MASK_WIDTH/2);
 	float Pvalue = 0;
 
+	for(int j =0; j < MASK_WIDTH; j++){
 
-	for(int j =0; j < MAX_MASK_WIDTH; j++){
+		int N_index = n_start_point+j;
 
-		int N_index = N_start_point+j;
-
-		if(N_index >=0 && N_index < INPUT_SIZE){
-			if((N_index>= this_title_start_point) && (N_index<next_tile_start_point)){
-				Pvalue+=N_ds[threadIdx.x+j-(MAX_MASK_WIDTH/2)]*M[j];
+		if(N_index >= 0 && N_index < INPUT_SIZE){
+			if((N_index >= this_title_start_point) && (N_index < next_tile_start_point)){
+				Pvalue+=N_s[threadIdx.x+j-(MASK_WIDTH/2)]*M[j];
 			}
 			else{
 				Pvalue+=N[N_index]*M[j];
@@ -38,6 +36,42 @@ __global__ void convolution_shared_memory(float *N, float *P){
 	}
 
 	P[i]=Pvalue;	
+}
+
+
+__global__ void convolution_constant_memory(float *N, float *M, float *P, int Width){
+
+	int i = blockIdx.x*blockDim.x+threadIdx.x;
+
+	float Pvalue = 0;
+
+	int n_start_point = i-(MASK_WIDTH/2);
+
+	for(int j =0; j<MASK_WIDTH;j++){
+		if(n_start_point+j >=0 && n_start_point+j < Width){
+			Pvalue+= N[n_start_point+j]*M[j];
+		}
+	}
+
+	P[i]=Pvalue;
+}
+
+__global__ void convolution_global_memory(float *N, float *M, float *P, int Width){
+	
+
+	int i = blockIdx.x*blockDim.x+threadIdx.x;
+
+	float Pvalue = 0;
+
+	int n_start_point = i-(MASK_WIDTH/2);
+
+	for(int j =0; j<MASK_WIDTH;j++){
+		if(n_start_point+j >=0 && n_start_point+j < Width){
+			Pvalue+= N[n_start_point+j]*M[j];
+		}
+	}
+
+	P[i]=Pvalue;
 }
 
 int main(){
@@ -49,11 +83,10 @@ int main(){
 	cudaMalloc(&d_N,INPUT_SIZE*sizeof(float));
 	cudaMalloc(&d_P,INPUT_SIZE*sizeof(float));
 
-
 	//host input and output
 	float *h_N = (float*)malloc(INPUT_SIZE*sizeof(float));
 	float *h_P = (float*)malloc(INPUT_SIZE*sizeof(float));
-	float *h_M = (float*)malloc(MAX_MASK_WIDTH*sizeof(float));
+	float *h_M = (float*)malloc(MASK_WIDTH*sizeof(float));
 
 	//initialize input on host
 	for(int i=0;i<INPUT_SIZE;++i){
@@ -65,16 +98,16 @@ int main(){
 	cudaMemcpy(d_P,h_P,INPUT_SIZE*sizeof(float),cudaMemcpyHostToDevice);
 
 	//initialize mask on host
-	for(int j=0;j<MAX_MASK_WIDTH;++j){
+	for(int j=0;j<MASK_WIDTH;++j){
 		h_M[j]=(float)j;
 	}
 
 	//transfer mask to constant memory
-	cudaMemcpyToSymbol(M,h_M,MAX_MASK_WIDTH*sizeof(float));
+	cudaMemcpyToSymbol(M,h_M,MASK_WIDTH*sizeof(float));
 
 
 	//call convolution kernel
-	convolution_shared_memory<<<(INPUT_SIZE+TPB-1)/TPB,TPB >>>(d_N,d_P);
+	convolution_shared_memory<<<(INPUT_SIZE+TILE_SIZE-1)/TILE_SIZE,TILE_SIZE >>>(d_N,d_P);
 
 	//retrieve result from device
 	cudaMemcpy(h_P,d_P,INPUT_SIZE*sizeof(float),cudaMemcpyDeviceToHost);
@@ -83,7 +116,6 @@ int main(){
 		printf("%f\n", h_P[i]);
 	}
 
-
 	cudaFree(d_N);
 	cudaFree(d_P);
 	cudaFree(M);
@@ -91,7 +123,5 @@ int main(){
 	free(h_N);
 	free(h_P);
 	free(h_M);
-
-	printf("Hello world \n");
 
 }
