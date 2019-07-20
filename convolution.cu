@@ -39,7 +39,7 @@ __global__ void convolution_shared_memory(float *N, float *P){
 }
 
 
-__global__ void convolution_constant_memory(float *N, float *M, float *P, int Width){
+__global__ void convolution_constant_memory(float *N, float *P, int Width){
 
 	int i = blockIdx.x*blockDim.x+threadIdx.x;
 
